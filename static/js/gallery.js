@@ -163,8 +163,46 @@ function selectDirectory(directory) {
     // 重新渲染目录列表以更新激活状态
     renderDirectoriesList();
     
+    // 更新面包屑导航
+    updateBreadcrumb();
+    
     // 加载该目录下的照片
     loadPhotos(directory);
+}
+
+// 更新面包屑导航
+function updateBreadcrumb() {
+    if (!elements.breadcrumb || !state.currentDirectory) {
+        return;
+    }
+    
+    // 清空面包屑
+    elements.breadcrumb.innerHTML = '';
+    
+    // 解析目录路径
+    const pathParts = state.currentDirectory.split('\\'); // Windows路径使用\分隔
+    let currentPath = '';
+    
+    // 创建面包屑项
+    pathParts.forEach((part, index) => {
+        currentPath = currentPath ? currentPath + '\\' + part : part;
+        
+        const breadcrumbItem = document.createElement('div');
+        breadcrumbItem.className = 'flex items-center';
+        
+        // 如果是最后一项，不添加点击事件
+        if (index === pathParts.length - 1) {
+            breadcrumbItem.innerHTML = `<span class="text-gray-700 font-medium">${part}</span>`;
+        } else {
+            breadcrumbItem.innerHTML = `
+                <span class="cursor-pointer hover:text-primary transition-colors">${part}</span>
+                <i class="fa fa-chevron-right text-xs mx-2 text-gray-300"></i>
+            `;
+            breadcrumbItem.addEventListener('click', () => selectDirectory(currentPath));
+        }
+        
+        elements.breadcrumb.appendChild(breadcrumbItem);
+    });
 }
 
 // 加载照片
@@ -183,10 +221,27 @@ function loadPhotos(directory) {
                 showToast('加载照片失败：' + data.error);
                 elements.gallery.innerHTML = '';
                 elements.gallery.appendChild(elements.emptyState);
+                
+                // 隐藏子目录容器
+                if (elements.subdirectoriesContainer) {
+                    elements.subdirectoriesContainer.classList.add('hidden');
+                }
+                
                 return;
             }
             
             state.photos = data.photos;
+            
+            // 处理并渲染子目录
+            if (data.subdirectories && Array.isArray(data.subdirectories)) {
+                renderSubdirectories(data.subdirectories);
+            } else {
+                // 如果没有子目录或子目录格式错误，隐藏子目录容器
+                if (elements.subdirectoriesContainer) {
+                    elements.subdirectoriesContainer.classList.add('hidden');
+                }
+            }
+            
             sortPhotos();
             renderPhotos();
             elements.photosCount.textContent = `${state.photos.length} 张照片`;
@@ -196,7 +251,66 @@ function loadPhotos(directory) {
             showToast('加载照片失败，请重试');
             elements.gallery.innerHTML = '';
             elements.gallery.appendChild(elements.emptyState);
+            
+            // 隐藏子目录容器
+            if (elements.subdirectoriesContainer) {
+                elements.subdirectoriesContainer.classList.add('hidden');
+            }
         });
+}
+
+// 渲染子目录
+function renderSubdirectories(subdirectories) {
+    if (!elements.subdirectoriesList || !elements.subdirectoriesContainer) {
+        return;
+    }
+    
+    // 清空子目录列表
+    elements.subdirectoriesList.innerHTML = '';
+    
+    // 如果没有子目录，隐藏容器
+    if (!subdirectories || subdirectories.length === 0) {
+        elements.subdirectoriesContainer.classList.add('hidden');
+        return;
+    }
+    
+    // 显示子目录容器
+    elements.subdirectoriesContainer.classList.remove('hidden');
+    
+    // 为每个子目录创建目录项
+    subdirectories.forEach(dir => {
+        // 添加防御性检查，确保dir.path存在且为字符串
+        if (!dir || typeof dir.path !== 'string') {
+            console.warn('跳过无效子目录项:', dir);
+            return;
+        }
+        
+        // 创建目录项元素
+        const dirItem = document.createElement('div');
+        dirItem.className = 'subdirectory-item bg-white rounded-lg shadow-sm p-4 flex flex-col items-center hover:shadow-md transition-shadow cursor-pointer min-w-[120px]';
+        
+        // 获取目录名称
+        const dirName = dir.path.split('\\').pop().split('/').pop();
+        
+        // 获取图标类名（根据是否包含照片显示不同图标）
+        const hasPhotos = dir.has_images || false;
+        const iconClass = hasPhotos ? 'fa-folder-open text-primary' : 'fa-folder text-gray-500';
+        
+        // 设置目录项内容
+        dirItem.innerHTML = `
+            <div class="subdirectory-icon w-12 h-12 rounded-md bg-gray-50 flex items-center justify-center mb-3">
+                <i class="fa ${iconClass} text-2xl"></i>
+            </div>
+            <div class="subdirectory-name text-sm font-medium text-center truncate w-full">${dirName}</div>
+            ${hasPhotos ? '<div class="subdirectory-photo-count text-xs text-gray-500 mt-1">有照片</div>' : ''}
+        `;
+        
+        // 添加点击事件
+        dirItem.addEventListener('click', () => selectDirectory(dir.path));
+        
+        // 添加到子目录列表
+        elements.subdirectoriesList.appendChild(dirItem);
+    });
 }
 
 // 排序照片
@@ -235,7 +349,7 @@ function sortPhotos() {
     }
 }
 
-// 渲染照片
+// 渲染照片 - 优化版，采用分批加载策略
 function renderPhotos() {
     elements.gallery.innerHTML = '';
     
@@ -244,15 +358,21 @@ function renderPhotos() {
         return;
     }
     
+    // 添加样式以使用CSS Grid布局
+    elements.gallery.style.display = 'grid';
+    elements.gallery.style.gridTemplateColumns = 'repeat(auto-fill, minmax(200px, 1fr))';
+    elements.gallery.style.gap = '10px';
+    elements.gallery.style.padding = '10px';
+    
     // 创建所有照片容器但先不显示图片
     const photoItems = [];
     state.photos.forEach((photo, index) => {
         const photoItem = document.createElement('div');
         photoItem.className = 'photo-container relative overflow-hidden rounded-lg shadow-md hover:shadow-xl transition-all duration-300 group card-hover bg-white';
         photoItem.innerHTML = `
-            <div class="photo-wrapper">
+            <div class="photo-wrapper" style="aspect-ratio: 1/1;">
                 <!-- 骨架屏 -->
-                <div class="w-full h-full bg-gray-200 rounded-lg skeleton-bg"></div>
+                <div class="w-full h-full bg-gray-200 rounded-lg skeleton-bg animate-pulse"></div>
             </div>
             <div class="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-end p-2 rounded-lg">
                 <span class="text-white text-xs truncate w-full font-medium">${photo.name}</span>
@@ -268,48 +388,66 @@ function renderPhotos() {
         photoItems.push(photoItem);
     });
     
-    // 按顺序加载图片以确保布局稳定
+    // 分批加载图片策略
+    const batchSize = 15; // 每批加载的图片数量
+    const batchDelay = 200; // 批与批之间的延迟(ms)
     let loadedCount = 0;
-    function loadNextImage() {
-        if (loadedCount >= state.photos.length) {
-            return;
+    
+    function loadBatch() {
+        // 计算当前批次的起始和结束索引
+        const startIndex = loadedCount;
+        const endIndex = Math.min(startIndex + batchSize, photoItems.length);
+        
+        // 加载当前批次的图片
+        for (let i = startIndex; i < endIndex; i++) {
+            loadPhotoImage(photoItems[i], state.photos[i], i);
         }
         
-        const index = loadedCount;
-        const photo = state.photos[index];
-        const photoItem = photoItems[index];
-        const img = new Image();
+        loadedCount = endIndex;
         
-        img.onload = function() {
-            // 替换骨架屏为实际图片
-            if (photoItem && typeof photoItem.querySelector === 'function') {
-                const wrapper = photoItem.querySelector('.photo-wrapper');
-                if (wrapper) {
-                    wrapper.innerHTML = '';
-                    img.className = 'object-contain max-w-full max-h-full rounded-lg transition-all duration-500 group-hover:scale-105 opacity-0 animate-fade-in';
-                    img.alt = photo.name;
-                    wrapper.appendChild(img);
-                    // 强制重排以触发动画
-                    void img.offsetWidth;
-                    img.classList.remove('opacity-0');
-                }
-            }
-            
-            loadedCount++;
-            // 延迟加载下一张，避免一次性请求过多
-            setTimeout(loadNextImage, 50);
-        };
-        
-        img.onerror = function() {
-            loadedCount++;
-            setTimeout(loadNextImage, 50);
-        };
-        
-        img.src = `/api/thumbnail/${encodeURIComponent(photo.path)}`;
+        // 如果还有图片未加载，继续加载下一批
+        if (loadedCount < photoItems.length) {
+            setTimeout(loadBatch, batchDelay);
+        }
     }
     
-    // 开始按顺序加载图片
-    loadNextImage();
+    // 开始第一批加载
+    loadBatch();
+}
+
+// 加载单个照片图片
+function loadPhotoImage(photoItem, photo, index) {
+    if (!photoItem || !photo) {
+        return;
+    }
+    
+    const wrapper = photoItem.querySelector('.photo-wrapper');
+    if (!wrapper) return;
+    
+    const img = new Image();
+    img.onload = function() {
+        // 替换骨架屏为实际图片
+        const skeleton = wrapper.querySelector('.skeleton-bg');
+        if (skeleton) {
+            wrapper.innerHTML = '';
+        }
+        
+        // 设置图片样式以确保完全填满容器
+        img.className = 'w-full h-full object-cover rounded-lg transition-all duration-500 group-hover:scale-105 opacity-0 animate-fade-in';
+        img.alt = photo.name;
+        wrapper.appendChild(img);
+        
+        // 强制重排以触发动画
+        void img.offsetWidth;
+        img.classList.remove('opacity-0');
+    };
+    
+    img.onerror = function() {
+        wrapper.innerHTML = '<div class="w-full h-full flex items-center justify-center bg-gray-100"><i class="fa fa-exclamation-triangle text-red-500 text-xl"></i></div>';
+    };
+    
+    // 使用渐进式加载
+    img.src = `/api/thumbnail/${encodeURIComponent(photo.path)}`;
 }
 
 // 格式化文件大小
@@ -331,4 +469,5 @@ window.selectDirectory = selectDirectory;
 window.loadPhotos = loadPhotos;
 window.sortPhotos = sortPhotos;
 window.renderPhotos = renderPhotos;
+window.loadPhotoImage = loadPhotoImage;
 window.formatFileSize = formatFileSize;

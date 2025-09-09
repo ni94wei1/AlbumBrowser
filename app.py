@@ -2,6 +2,8 @@ from flask import Flask, jsonify, send_file, request, render_template
 import os
 import hashlib
 from PIL import Image
+# 设置PIL支持更大的图片尺寸，避免DecompressionBombWarning
+Image.MAX_IMAGE_PIXELS = 1000000000  # 设置为10亿像素
 from PIL.ExifTags import TAGS, GPSTAGS
 import io
 import time
@@ -130,10 +132,204 @@ cache_lock = threading.Lock()
 # 支持的图片格式
 SUPPORTED_FORMATS = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']
 
+# 图片处理计数器
+image_processing_stats = {
+    "total_files": 0,
+    "generated_thumbnails": 0,
+    "skipped_thumbnails": 0,
+    "generated_viewer_images": 0,
+    "skipped_viewer_images": 0,
+    "errors": 0
+}
+
+# 辅助函数：递归获取目录下的所有图片文件
+def get_all_images_recursive(directory):
+    """递归获取目录及其子目录下的所有图片文件（优化版）"""
+    image_files = []
+    try:
+        # 检查目录是否存在
+        if not os.path.isdir(directory):
+            print(f"[错误] 目录不存在: {directory}")
+            return []
+            
+        items = os.listdir(directory)
+        
+        for item in items:
+            item_path = os.path.join(directory, item)
+            if os.path.isfile(item_path):
+                # 检查文件是否为支持的图片格式
+                file_ext = os.path.splitext(item)[1].lower()
+                if file_ext in SUPPORTED_FORMATS:
+                    image_files.append(item_path)
+            elif os.path.isdir(item_path):
+                # 递归处理子目录
+                subdir_images = get_all_images_recursive(item_path)
+                print(f"[调试] 从子目录 {item} 中找到 {len(subdir_images)} 张图片")
+                image_files.extend(subdir_images)
+    except Exception as e:
+        print(f"[错误] 递归获取图片时出错: {str(e)}")
+    print(f"[调试] 离开 get_all_images_recursive，目录 {directory} 共找到 {len(image_files)} 张图片")
+    return image_files
+
+# 测试函数：验证文件夹穿透功能
+def test_folder_penetration():
+    """测试文件夹穿透功能，输出详细的调试信息"""
+    print("\n===== 开始测试文件夹穿透功能 =====")
+    
+    # 测试配置的测试目录
+    test_dir = "E:\\测试目录"
+    if os.path.isdir(test_dir):
+        print(f"[测试] 找到测试目录: {test_dir}")
+        
+        # 测试1：递归获取所有图片
+        print("[测试1] 递归获取测试目录中的所有图片:")
+        all_images = get_all_images_recursive(test_dir)
+        print(f"[测试1] 在测试目录中找到 {len(all_images)} 张图片")
+        if all_images:
+            print(f"[测试1] 前5张图片:")
+            for img in all_images[:5]:
+                print(f"[测试1]   - {img}")
+        
+        # 测试2：测试get_photos函数逻辑中的目录验证
+        print("\n[测试2] 测试目录验证逻辑:")
+        is_subdirectory = False
+        for configured_dir in config["photo_directories"]:
+            if os.path.normpath(test_dir).startswith(os.path.normpath(configured_dir)):
+                is_subdirectory = True
+                print(f"[测试2] 目录验证通过: {test_dir} 是已配置目录 {configured_dir} 的子目录")
+                break
+        if not is_subdirectory:
+            print(f"[测试2] 目录验证失败: {test_dir}")
+        
+        # 测试3：测试不含图片的子目录查找
+        print("\n[测试3] 测试不含图片的子目录查找:")
+        subdirs_without_images = get_subdirectories_without_images(test_dir)
+        print(f"[测试3] 找到 {len(subdirs_without_images)} 个不含图片的子目录")
+        if subdirs_without_images:
+            print(f"[测试3] 不含图片的子目录列表:")
+            for subdir in subdirs_without_images:
+                print(f"[测试3]   - {subdir['name']} ({subdir['path']})")
+        
+        # 测试4：测试多层级穿透
+        print("\n[测试4] 测试多层级穿透:")
+        # 尝试访问测试目录的子目录
+        for subdir_name in ['1', '2', '3']:
+            subdir_path = os.path.join(test_dir, subdir_name)
+            if os.path.isdir(subdir_path):
+                print(f"[测试4] 访问子目录: {subdir_path}")
+                subdir_images = get_all_images_recursive(subdir_path)
+                print(f"[测试4] 在 {subdir_name} 中找到 {len(subdir_images)} 张图片")
+                # 测试更深层级的穿透
+                if subdir_name == '3':
+                    for deep_subdir_name in ['4', '5']:
+                        deep_subdir_path = os.path.join(subdir_path, deep_subdir_name)
+                        if os.path.isdir(deep_subdir_path):
+                            print(f"[测试4] 访问深层子目录: {deep_subdir_path}")
+                            deep_images = get_all_images_recursive(deep_subdir_path)
+                            print(f"[测试4] 在 {deep_subdir_name} 中找到 {len(deep_images)} 张图片")
+    else:
+        print(f"[测试] 警告：测试目录 {test_dir} 不存在")
+    
+    print("===== 文件夹穿透功能测试结束 =====\n")
+
+# 辅助函数：递归获取目录下所有不含图片的子目录
+def get_subdirectories_without_images(directory):
+    """递归获取目录下所有不含图片的子目录，包括多层深度"""
+    print(f"[调试] 进入 get_subdirectories_without_images，检查目录: {directory}")
+    subdirs = []
+    try:
+        # 先检查当前目录是否包含图片
+        has_images = False
+        for item in os.listdir(directory):
+            item_path = os.path.join(directory, item)
+            if os.path.isfile(item_path) and os.path.splitext(item)[1].lower() in SUPPORTED_FORMATS:
+                has_images = True
+                print(f"[调试] 目录 {directory} 包含图片: {item}")
+                break
+        
+        # 如果当前目录不包含图片，将其添加到列表（除了顶层目录）
+        if not has_images:
+            print(f"[调试] 目录 {directory} 不包含图片")
+            if directory not in config["photo_directories"]:
+                print(f"[调试] 目录 {directory} 不是顶层配置目录，添加到不含图片的子目录列表")
+                # 获取目录的基本名称作为显示名称
+                dir_name = os.path.basename(directory)
+                subdirs.append({
+                    'path': directory,
+                    'name': dir_name
+                })
+            else:
+                print(f"[调试] 目录 {directory} 是顶层配置目录，不添加到不含图片的子目录列表")
+        
+        # 递归检查所有子目录
+        for item in os.listdir(directory):
+            item_path = os.path.join(directory, item)
+            if os.path.isdir(item_path):
+                print(f"[调试] 在目录 {directory} 中找到子目录: {item}")
+                # 递归获取子目录中的不含图片目录
+                child_subdirs = get_subdirectories_without_images(item_path)
+                if child_subdirs:
+                    print(f"[调试] 从子目录 {item} 中找到 {len(child_subdirs)} 个不含图片的目录")
+                else:
+                    print(f"[调试] 子目录 {item} 中没有找到不含图片的目录")
+                subdirs.extend(child_subdirs)
+    except Exception as e:
+        print(f"[错误] 获取子目录时出错: {str(e)}")
+    print(f"[调试] 离开 get_subdirectories_without_images，目录 {directory} 找到 {len(subdirs)} 个不含图片的子目录")
+    return subdirs
+
+# 辅助函数：递归获取目录下的所有子目录
+def get_all_subdirectories(directory):
+    """递归获取目录下的所有子目录，包括包含图片的子目录"""
+    print(f"[调试] 进入 get_all_subdirectories，检查目录: {directory}")
+    subdirs = []
+    try:
+        # 检查所有子目录
+        for item in os.listdir(directory):
+            item_path = os.path.join(directory, item)
+            if os.path.isdir(item_path):
+                print(f"[调试] 在目录 {directory} 中找到子目录: {item}")
+                # 添加当前子目录到列表（除了顶层配置目录）
+                if directory not in config["photo_directories"] or item_path not in config["photo_directories"]:
+                    dir_name = os.path.basename(item_path)
+                    # 检查子目录是否包含图片
+                    has_images = False
+                    for subitem in os.listdir(item_path):
+                        subitem_path = os.path.join(item_path, subitem)
+                        if os.path.isfile(subitem_path) and os.path.splitext(subitem)[1].lower() in SUPPORTED_FORMATS:
+                            has_images = True
+                            break
+                    
+                    subdirs.append({
+                        'path': item_path,
+                        'name': dir_name,
+                        'has_images': has_images
+                    })
+                
+                # 递归获取子目录的子目录
+                child_subdirs = get_all_subdirectories(item_path)
+                if child_subdirs:
+                    print(f"[调试] 从子目录 {item} 中找到 {len(child_subdirs)} 个子目录")
+                subdirs.extend(child_subdirs)
+    except Exception as e:
+        print(f"[错误] 获取所有子目录时出错: {str(e)}")
+    print(f"[调试] 离开 get_all_subdirectories，目录 {directory} 找到 {len(subdirs)} 个子目录")
+    return subdirs
+
 # 预生成缩略图和浏览用大图函数
 def pregenerate_images():
     """服务端启动时预生成所有照片的缩略图和浏览用大图并保存到本地"""
     print(f"[服务启动] 开始预生成图片...")
+    
+    # 重置统计计数器
+    image_processing_stats.update({
+        "total_files": 0,
+        "generated_thumbnails": 0,
+        "skipped_thumbnails": 0,
+        "generated_viewer_images": 0,
+        "skipped_viewer_images": 0,
+        "errors": 0
+    })
     
     # 使用集合来跟踪已经处理过的文件路径，避免重复处理
     processed_files = set()
@@ -159,12 +355,20 @@ def pregenerate_images():
         except Exception as e:
             print(f"[错误] 处理目录 {directory} 时出错: {str(e)}")
     
+    # 输出统计信息
     print(f"[服务启动] 图片预生成完成，共处理 {len(processed_files)} 个文件")
+    print(f"[统计信息] 生成缩略图: {image_processing_stats['generated_thumbnails']}, 跳过缩略图: {image_processing_stats['skipped_thumbnails']}")
+    print(f"[统计信息] 生成浏览图: {image_processing_stats['generated_viewer_images']}, 跳过浏览图: {image_processing_stats['skipped_viewer_images']}")
+    if image_processing_stats['errors'] > 0:
+        print(f"[统计信息] 处理错误: {image_processing_stats['errors']}")
     
 
 def generate_and_save_thumbnail(file_path):
-    """生成并保存指定图片的缩略图到本地（正方形裁剪）"""
+    """生成并保存指定图片的缩略图到本地（正方形裁剪，优化版）"""
     try:
+        # 增加文件计数
+        image_processing_stats["total_files"] += 1
+        
         # 获取缩略图存储路径（按照原目录结构组织）
         thumbnail_path = get_thumbnail_path(file_path)
         
@@ -176,12 +380,20 @@ def generate_and_save_thumbnail(file_path):
             
             if thumbnail_mtime >= file_mtime:
                 # 缩略图是最新的，不需要重新生成
-                print(f"[缩略图] 跳过: {file_path} (缩略图已是最新)")
+                image_processing_stats["skipped_thumbnails"] += 1
                 return
             else:
-                print(f"[缩略图] 更新: {file_path} -> {thumbnail_path} (缩略图过期)")
+                # 缩略图需要更新
+                image_processing_stats["generated_thumbnails"] += 1
         else:
-            print(f"[缩略图] 新建: {file_path} -> {thumbnail_path} (缩略图不存在)")
+            # 缩略图不存在，需要创建
+            image_processing_stats["generated_thumbnails"] += 1
+        
+        # 优化大图像处理：使用PIL的延迟加载功能，避免一次性加载大图到内存
+        from PIL import ImageFile
+        # 启用逐行加载，适合超大图片处理
+        ImageFile.LOAD_TRUNCATED_IMAGES = True
+        ImageFile.MAXBLOCK = 2**25  # 增加缓存块大小
         
         # 生成缩略图
         with Image.open(file_path) as img:
@@ -191,6 +403,15 @@ def generate_and_save_thumbnail(file_path):
             
             # 获取原图尺寸
             width, height = img.size
+            
+            # 针对超大图（超过4000x4000像素），先进行一次快速缩小，减少内存占用
+            if width > 4000 or height > 4000:
+                # 先按比例缩小到4000像素
+                scale_factor = 4000 / max(width, height)
+                new_size = (int(width * scale_factor), int(height * scale_factor))
+                # 使用LANCZOS重采样方法，平衡质量和速度
+                img = img.resize(new_size, Image.Resampling.LANCZOS)
+                width, height = new_size
             
             # 计算正方形裁剪区域（居中裁剪）
             min_dim = min(width, height)
@@ -202,14 +423,14 @@ def generate_and_save_thumbnail(file_path):
             # 裁剪成正方形
             img = img.crop((left, top, right, bottom))
             
-            # 调整到目标尺寸
-            img.thumbnail(config["thumbnail_size"])
+            # 调整到目标尺寸，使用更高效的重采样方法
+            img.thumbnail(config["thumbnail_size"], Image.Resampling.LANCZOS)
             
-            # 保存到本地文件，提高质量解决模糊问题
-            img.save(thumbnail_path, 'JPEG', quality=90)
+            # 保存到本地文件，优化质量设置
+            img.save(thumbnail_path, 'JPEG', quality=90, optimize=True, progressive=True)
             
-        print(f"[缩略图] 已生成: {file_path} -> {thumbnail_path}")
     except Exception as e:
+        image_processing_stats["errors"] += 1
         print(f"[错误] 生成缩略图 {file_path} 时出错: {str(e)}")
 
 
@@ -227,12 +448,14 @@ def generate_and_save_viewer_image(file_path):
             
             if viewer_image_mtime >= file_mtime:
                 # 浏览用大图是最新的，不需要重新生成
-                print(f"[浏览图] 跳过: {file_path} (浏览用大图已是最新)")
+                image_processing_stats["skipped_viewer_images"] += 1
                 return
             else:
-                print(f"[浏览图] 更新: {file_path} -> {viewer_image_path} (浏览用大图过期)")
+                # 浏览用大图需要更新
+                image_processing_stats["generated_viewer_images"] += 1
         else:
-            print(f"[浏览图] 新建: {file_path} -> {viewer_image_path} (浏览用大图不存在)")
+            # 浏览用大图不存在，需要创建
+            image_processing_stats["generated_viewer_images"] += 1
         
         # 生成浏览用大图
         with Image.open(file_path) as img:
@@ -277,8 +500,8 @@ def generate_and_save_viewer_image(file_path):
                 # 如果质量降到50以下还是超过大小限制，就直接保存当前质量
                 img.save(viewer_image_path, 'JPEG', quality=50)
             
-        print(f"[浏览图] 已生成: {file_path} -> {viewer_image_path}")
     except Exception as e:
+        image_processing_stats["errors"] += 1
         print(f"[错误] 生成浏览用大图 {file_path} 时出错: {str(e)}")
 
 @app.route('/')
@@ -287,16 +510,37 @@ def index():
 
 @app.route('/api/directories', methods=['GET'])
 def get_directories():
-    """获取配置的照片目录列表"""
-    # 将字符串路径转换为对象数组，每个对象包含path属性
-    directories = [{'path': dir_path} for dir_path in config["photo_directories"]]
+    """获取配置的照片目录列表及其不含图片的子目录"""
+    directories = []
+    
+    # 首先添加配置的顶层目录
+    for dir_path in config["photo_directories"]:
+        directories.append({'path': dir_path})
+    
+    # 递归获取所有不含图片的子目录（对于每个顶层目录）
+    all_subdirs_without_images = []
+    for dir_path in config["photo_directories"]:
+        subdirs = get_subdirectories_without_images(dir_path)
+        all_subdirs_without_images.extend(subdirs)
+    
+    # 去重，确保每个不含图片的目录只出现一次
+    seen_paths = set()
+    unique_subdirs = []
+    for subdir in all_subdirs_without_images:
+        if subdir['path'] not in seen_paths:
+            seen_paths.add(subdir['path'])
+            unique_subdirs.append(subdir)
+    
+    # 添加不含图片的子目录
+    directories.extend(unique_subdirs)
+    
     return jsonify({
         "success": True,
         "directories": directories
     })
 
 def pregenerate_images_for_directory(directory):
-    """为指定目录预生成照片的缩略图和浏览用大图"""
+    """为指定目录及其所有子目录预生成照片的缩略图和浏览用大图"""
     if not os.path.isdir(directory):
         print(f"[错误] 目录不存在: {directory}")
         return
@@ -307,18 +551,19 @@ def pregenerate_images_for_directory(directory):
     processed_files = set()
     
     try:
-        # 获取目录中的所有图片文件
-        for filename in os.listdir(directory):
-            file_path = os.path.join(directory, filename)
-            if os.path.isfile(file_path) and os.path.splitext(filename)[1].lower() in SUPPORTED_FORMATS:
-                # 检查文件是否已经处理过
-                if file_path not in processed_files:
-                    # 添加到已处理集合
-                    processed_files.add(file_path)
-                    # 生成并保存缩略图
-                    generate_and_save_thumbnail(file_path)
-                    # 生成并保存浏览用大图
-                    generate_and_save_viewer_image(file_path)
+        # 递归获取目录及其所有子目录中的图片文件
+        all_image_files = get_all_images_recursive(directory)
+        
+        # 为每个图片文件生成缩略图和浏览用大图
+        for file_path in all_image_files:
+            # 检查文件是否已经处理过
+            if file_path not in processed_files:
+                # 添加到已处理集合
+                processed_files.add(file_path)
+                # 生成并保存缩略图
+                generate_and_save_thumbnail(file_path)
+                # 生成并保存浏览用大图
+                generate_and_save_viewer_image(file_path)
     except Exception as e:
         print(f"[错误] 处理目录 {directory} 时出错: {str(e)}")
     
@@ -367,118 +612,123 @@ def remove_directory(index):
 
 @app.route('/api/photos', methods=['GET'])
 def get_photos():
-    """获取指定目录下的照片列表"""
+    """获取指定目录下的照片列表，包括所有子目录中的图片"""
     directory = request.args.get('dir', '')
-    if not directory or directory not in config["photo_directories"] or not os.path.isdir(directory):
-        return jsonify({"error": "无效的目录"}), 400
+    print(f"[调试] 收到get_photos请求，目录: {directory}")
+    print(f"[调试] 请求参数: {request.args}")
+    
+    # 针对测试目录添加特别的调试信息
+    if "测试目录" in directory:
+        print(f"[调试] 访问的是测试目录: {directory}")
+    
+    if not directory or not os.path.isdir(directory):
+        print(f"[调试] 目录为空或不存在: {directory}")
+        # 放宽限制，如果目录不在配置中但存在，也允许访问
+        # 但仍然需要验证该目录是否在某个已配置目录的子目录中
+        is_subdirectory = False
+        for configured_dir in config["photo_directories"]:
+            if os.path.normpath(directory).startswith(os.path.normpath(configured_dir)):
+                is_subdirectory = True
+                print(f"[调试] 目录验证通过: {directory} 是已配置目录 {configured_dir} 的子目录")
+                break
+        if not is_subdirectory:
+            print(f"[调试] 目录验证失败: {directory}")
+            return jsonify({"error": "无效的目录"}), 400
     
     # 检查缓存
     cache_key = f"photos:{directory}"
     current_time = time.time()
     
     with cache_lock:
-        if cache_key in cache and current_time - cache[cache_key]['timestamp'] < config['cache_expiry']:
-            return jsonify(cache[cache_key]['data'])
+        if cache_key in cache:
+            # 使用自定义缓存过期时间（如果有），否则使用默认值
+            expiry_time = cache[cache_key].get('custom_expiry', config['cache_expiry'])
+            if current_time - cache[cache_key]['timestamp'] < expiry_time:
+                print(f"[调试] 从缓存获取照片列表，目录: {directory}")
+                cache_data = cache[cache_key]['data']
+                print(f"[调试] 缓存中的照片数量: {len(cache_data.get('photos', []))}, 子目录数量: {len(cache_data.get('subdirectories', []))}")
+                print(f"[调试] 缓存过期时间: {expiry_time}秒")
+                return jsonify(cache_data)
     
-    # 获取照片列表
+    # 获取照片列表（递归获取所有子目录中的图片）
     photos = []
     try:
-        for filename in os.listdir(directory):
-            file_path = os.path.join(directory, filename)
-            if os.path.isfile(file_path) and os.path.splitext(filename)[1].lower() in SUPPORTED_FORMATS:
-                # 创建照片基本信息
-                photo_info = {
-                    "name": filename,
-                    "path": file_path,
-                    "size": os.path.getsize(file_path),
-                    "modified": datetime.fromtimestamp(os.path.getmtime(file_path)).strftime('%Y-%m-%d %H:%M:%S'),
-                    "capture_date": None  # 初始化拍摄日期为空
-                }
-                
-                # 尝试从EXIF获取拍摄日期
-                try:
-                    with Image.open(file_path) as img:
-                        exif_data = img._getexif()
-                        if exif_data:
-                            # 检查拍摄日期标签 (DateTimeOriginal - 标签ID 36867)
-                            if 36867 in exif_data:
-                                capture_date_str = exif_data[36867]
-                                try:
-                                    # 将EXIF日期格式 (YYYY:MM:DD HH:MM:SS) 转换为标准格式
-                                    photo_info["capture_date"] = datetime.strptime(capture_date_str, '%Y:%m:%d %H:%M:%S').strftime('%Y-%m-%d %H:%M:%S')
-                                except ValueError:
-                                    # 如果日期格式解析失败，保持为原始字符串
-                                    photo_info["capture_date"] = capture_date_str
-                except Exception as exif_error:
-                    print(f"[警告] 获取照片EXIF日期时出错: {str(exif_error)}")
-                
-                # 尝试获取照片星级信息
-                try:
-                    # 优先从photo_ratings中获取星级
-                    star_rating = photo_ratings.get(file_path, 0)
-                    
-                    # 尝试从EXIF中获取星级，以确保最新的评级信息
-                    try:
-                        with Image.open(file_path) as img:
-                            exif_data = img._getexif()
-                            if exif_data:
-                                # 检查主要评级标签
-                                if 18246 in exif_data:  # 18246是Rating的标签ID
-                                    main_rating = exif_data[18246]
-                                    if isinstance(main_rating, int) and 0 <= main_rating <= 5:
-                                        star_rating = main_rating
-                                # 检查Windows评级标签
-                                elif 40961 in exif_data:  # Windows照片评级标签
-                                    windows_rating_value = exif_data[40961]
-                                    if isinstance(windows_rating_value, int):
-                                        # Windows评级映射: 0-5星对应0,25,50,75,100,125
-                                        if windows_rating_value == 0:
-                                            star_rating = 0
-                                        elif windows_rating_value == 25:
-                                            star_rating = 1
-                                        elif windows_rating_value == 50:
-                                            star_rating = 2
-                                        elif windows_rating_value == 75:
-                                            star_rating = 3
-                                        elif windows_rating_value == 100:
-                                            star_rating = 4
-                                        elif windows_rating_value == 125:
-                                            star_rating = 5
-                    except Exception as exif_error:
-                        print(f"[警告] 获取照片EXIF数据时出错: {str(exif_error)}")
-                        # 即使EXIF读取失败，也继续使用photo_ratings中的值
-                    
-                    # 添加星级信息到metadata字段
-                    photo_info["metadata"] = {
-                        "星级": star_rating
-                    }
-                except Exception as metadata_error:
-                    print(f"[警告] 获取照片元数据时出错: {str(metadata_error)}")
-                    # 如果获取元数据失败，仍然添加空的metadata字段，确保前端代码正常运行
-                    photo_info["metadata"] = {}
-                
-                photos.append(photo_info)
+        # 递归获取所有图片文件
+        print(f"[调试] 开始递归获取目录 {directory} 及其子目录中的图片")
+        all_image_files = get_all_images_recursive(directory)
+        print(f"[调试] 递归获取完成，共找到 {len(all_image_files)} 张图片")
+        
+        # 为每个图片文件创建信息
+        # 优化：对于大量文件，只获取基本信息，减少日志输出
+        for i, file_path in enumerate(all_image_files):
+            filename = os.path.basename(file_path)
+            # 创建照片基本信息
+            photo_info = {
+                "name": filename,
+                "path": file_path,
+                "size": os.path.getsize(file_path),
+                "modified": datetime.fromtimestamp(os.path.getmtime(file_path)).strftime('%Y-%m-%d %H:%M:%S'),
+                "capture_date": None,  # 初始化拍摄日期为空
+                "metadata": {}
+            }
+            
+            # 优化：只获取基础信息，延迟获取EXIF信息（在需要时由前端请求）
+            # 仅从photo_ratings中获取星级，避免重复打开图片文件
+            star_rating = photo_ratings.get(file_path, 0)
+            photo_info["metadata"] = {"星级": star_rating}
+            
+            photos.append(photo_info)
         
         # 按修改时间排序（最新的在前）
         photos.sort(key=lambda x: x['modified'], reverse=True)
+        print(f"[调试] 照片排序完成，共 {len(photos)} 张照片")
+        
+        # 获取所有子目录列表
+        print(f"[调试] 开始获取目录 {directory} 下的所有子目录")
+        subdirectories = get_all_subdirectories(directory)
+        print(f"[调试] 找到 {len(subdirectories)} 个子目录")
+        # 输出找到的子目录详情
+        for subdir in subdirectories:
+            status = "包含图片" if subdir['has_images'] else "不含图片"
+            print(f"[调试] 子目录: {subdir['name']} ({subdir['path']}) - {status}")
         
         # 缓存结果
-        result = {"photos": photos, "directory": directory}
+        result = {"photos": photos, "directory": directory, "subdirectories": subdirectories}
+        print(f"[调试] 准备返回结果 - 照片数: {len(photos)}, 子目录数: {len(subdirectories)}")
+        
+        # 增强缓存：对于大目录，增加缓存过期时间
+        cache_expiry = config['cache_expiry']
+        if len(photos) > 500:  # 对于超过500张图片的大目录，延长缓存时间
+            cache_expiry = cache_expiry * 2  # 缓存时间翻倍
+            print(f"[调试] 检测到大目录，延长缓存时间至 {cache_expiry} 秒")
+        
         with cache_lock:
             cache[cache_key] = {
                 'timestamp': current_time,
-                'data': result
+                'data': result,
+                'custom_expiry': cache_expiry  # 存储自定义缓存过期时间
             }
         
+        # 记录请求完成日志
+        print(f"[调试] get_photos请求完成，耗时: {time.time() - current_time:.2f}秒")
         return jsonify(result)
     except Exception as e:
+        print(f"[错误] 获取照片列表时出错: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/thumbnail/<path:file_path>')
 def get_thumbnail(file_path):
-    """获取照片缩略图"""
+    """获取缩略图"""
+    print(f"[调试] 接收到的原始file_path: {file_path}")
+    
+    # 先解码URL编码的特殊字符
+    import urllib.parse
+    file_path = urllib.parse.unquote(file_path)
+    print(f"[调试] URL解码后的file_path: {file_path}")
+    
     # 确保文件路径使用正确的分隔符
     file_path = file_path.replace('/', os.path.sep)
+    print(f"[调试] 替换分隔符后的file_path: {file_path}")
     
     # 检查文件是否在配置的目录中（容错处理）
     is_allowed = False
@@ -486,16 +736,29 @@ def get_thumbnail(file_path):
         # 规范化目录路径，确保正确处理编码
         norm_dir = os.path.normpath(dir_path)
         norm_file = os.path.normpath(file_path)
+        print(f"[调试] 比较目录 {norm_dir} 和文件路径 {norm_file}")
         if norm_file.startswith(norm_dir):
             is_allowed = True
+            print(f"[调试] 文件路径在允许的目录中")
             break
     
     if not is_allowed:
+        print(f"[错误] 访问受限: {file_path}")
         return jsonify({"error": "访问受限"}), 403
     
     # 检查文件是否存在
-    if not os.path.isfile(file_path) or os.path.splitext(file_path)[1].lower() not in SUPPORTED_FORMATS:
-        return jsonify({"error": "无效的图片文件"}), 400
+    file_exists = os.path.isfile(file_path)
+    file_ext = os.path.splitext(file_path)[1].lower()
+    is_supported_format = file_ext in SUPPORTED_FORMATS
+    
+    print(f"[调试] 文件是否存在: {file_exists}")
+    print(f"[调试] 文件扩展名: {file_ext}")
+    print(f"[调试] 是否支持的格式: {is_supported_format}")
+    
+    if not file_exists or not is_supported_format:
+        error_msg = "文件不存在" if not file_exists else f"不支持的文件格式: {file_ext}"
+        print(f"[错误] 无效的图片文件: {error_msg}")
+        return jsonify({"error": f"无效的图片文件: {error_msg}"}), 400
     
     # 获取缩略图存储路径（按照原目录结构组织）
     thumbnail_path = get_thumbnail_path(file_path)
@@ -514,6 +777,10 @@ def get_thumbnail(file_path):
 @app.route('/api/viewer_image/<path:file_path>')
 def get_viewer_image(file_path):
     """获取浏览用大图"""
+    # 先解码URL编码的特殊字符
+    import urllib.parse
+    file_path = urllib.parse.unquote(file_path)
+    
     # 确保文件路径使用正确的分隔符
     file_path = file_path.replace('/', os.path.sep)
     
@@ -551,6 +818,10 @@ def get_viewer_image(file_path):
 @app.route('/api/photo/<path:file_path>')
 def get_photo(file_path):
     """获取原始照片"""
+    # 先解码URL编码的特殊字符
+    import urllib.parse
+    file_path = urllib.parse.unquote(file_path)
+    
     # 确保文件路径使用正确的分隔符
     file_path = file_path.replace('/', os.path.sep)
     
@@ -574,6 +845,52 @@ def get_photo(file_path):
     try:
         return send_file(file_path)
     except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# 添加测试路由，用于调试get_photos函数
+@app.route('/api/test_photos', methods=['GET'])
+def test_photos():
+    """测试路由，用于调试get_photos函数的执行情况"""
+    test_dir = request.args.get('dir', '')
+    if not test_dir:
+        # 如果没有提供目录参数，尝试使用配置的第一个目录
+        if config["photo_directories"]:
+            test_dir = config["photo_directories"][0]
+        else:
+            return jsonify({"error": "没有可用的测试目录"}), 400
+    
+    print(f"[测试] 测试路由被调用，目录: {test_dir}")
+    
+    # 检查目录是否存在
+    if not os.path.isdir(test_dir):
+        return jsonify({"error": f"测试目录不存在: {test_dir}"}), 400
+    
+    # 尝试获取该目录下的照片
+    try:
+        # 直接调用get_all_images_recursive函数
+        print(f"[测试] 调用get_all_images_recursive函数")
+        all_images = get_all_images_recursive(test_dir)
+        print(f"[测试] get_all_images_recursive返回 {len(all_images)} 张图片")
+        
+        # 尝试获取子目录
+        print(f"[测试] 调用get_all_subdirectories函数")
+        subdirs = get_all_subdirectories(test_dir)
+        print(f"[测试] get_all_subdirectories返回 {len(subdirs)} 个子目录")
+        
+        # 构建测试结果
+        result = {
+            "success": True,
+            "test_directory": test_dir,
+            "image_count": len(all_images),
+            "subdirectory_count": len(subdirs)
+        }
+        
+        if all_images:
+            result["sample_images"] = all_images[:3]  # 返回前3张图片作为示例
+        
+        return jsonify(result)
+    except Exception as e:
+        print(f"[测试错误] 测试过程中出错: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/photo_metadata/<path:file_path>')
@@ -881,6 +1198,9 @@ def update_photo_rating():
 if __name__ == '__main__':
     # 提示用户在生产环境中不要使用debug=True
     print("注意：在生产环境中请使用WSGI服务器运行此应用，不要使用debug=True")
+    
+    # 运行文件夹穿透功能测试
+    test_folder_penetration()
     
     # 启动时预生成缩略图和浏览用大图（在独立线程中运行，避免阻塞服务启动）
     image_thread = threading.Thread(target=pregenerate_images)

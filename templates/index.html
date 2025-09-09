@@ -319,6 +319,19 @@
                         </select>
                     </div>
                 </div>
+                
+                <!-- 目录面包屑导航 -->
+                <div id="breadcrumb" class="mt-3 flex items-center text-sm text-gray-500 overflow-x-auto hide-scrollbar">
+                    <!-- 目录面包屑将在这里动态生成 -->
+                </div>
+            </div>
+            
+            <!-- 子目录导航 -->
+            <div id="subdirectories-container" class="mb-6 hidden">
+                <h3 class="text-sm font-medium text-gray-500 mb-3">子目录</h3>
+                <div id="subdirectories-list" class="flex gap-3 overflow-x-auto pb-2 hide-scrollbar">
+                    <!-- 子目录将在这里动态生成 -->
+                </div>
             </div>
             
             <!-- 相册网格 -->
@@ -525,6 +538,7 @@
 
     <!-- 外部JavaScript文件引用 -->
     <script src="/static/js/app.js"></script>
+    <script src="/static/js/virtual-list.js"></script>
     <script src="/static/js/gallery.js"></script>
     <script src="/static/js/lightbox.js"></script>
     <script src="/static/js/touch.js"></script>

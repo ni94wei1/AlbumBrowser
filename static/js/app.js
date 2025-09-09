@@ -48,6 +48,11 @@ const elements = {
     metaCamera: null,
     metaAperture: null,
     metaExposure: null,
+    
+    // 子目录导航
+    subdirectoriesContainer: null,
+    subdirectoriesList: null,
+    breadcrumb: null,
     metaIso: null,
     metaFocal: null,
     metaModified: null,
@@ -140,6 +145,11 @@ function initDOMReferences() {
     elements.closeQrCodeBtn = document.getElementById('close-qr-code');
     elements.qrCodeContainer = document.getElementById('qr-code-container');
     elements.qrCodeUrl = document.getElementById('qr-code-url');
+    
+    // 子目录导航
+    elements.subdirectoriesContainer = document.getElementById('subdirectories-container');
+    elements.subdirectoriesList = document.getElementById('subdirectories-list');
+    elements.breadcrumb = document.getElementById('breadcrumb');
 }
 
 // 添加安全的事件监听器（避免重复添加）
