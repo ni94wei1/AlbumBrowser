@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>个人相册浏览器</title>
+    <!-- 引入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 Font Awesome -->
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    
+    <!-- 引入二维码生成库 -->
+    <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+    
+    <!-- Tailwind 配置 -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#4F46E5', // 更现代的靛蓝色
+                        secondary: '#7C3AED',
+                        accent: '#F97316',
+                        dark: '#1E293B',
+                        light: '#F8FAFC'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif'],
+                    },
+                    animation: {
+                        'fade-in': 'fadeIn 0.3s ease-in-out',
+                        'slide-in': 'slideIn 0.3s ease-out',
+                        'slide-out': 'slideOut 0.3s ease-in',
+                        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                        'skeleton-gradient': 'skeletonGradient 1.5s infinite'
+                    },
+                    keyframes: {
+                        fadeIn: {
+                            '0%': { opacity: '0' },
+                            '100%': { opacity: '1' }
+                        },
+                        slideIn: {
+                            '0%': { transform: 'translateX(-100%)' },
+                            '100%': { transform: 'translateX(0)' }
+                        },
+                        slideOut: {
+                            '0%': { transform: 'translateX(0)' },
+                            '100%': { transform: 'translateX(-100%)' }
+                        },
+                        skeletonGradient: {
+                            '0%': { backgroundPosition: '200% 0' },
+                            '100%': { backgroundPosition: '-200% 0' }
+                        }
+                    }
+                },
+            }
+        }
+    </script>
+    
+    <!-- Tailwind 自定义工具类 -->
+    <style type="text/tailwindcss">
+        @layer utilities {
+            .content-auto {
+                content-visibility: auto;
+            }
+            .scrollbar-hide {
+                -ms-overflow-style: none;
+                scrollbar-width: none;
+            }
+            .scrollbar-hide::-webkit-scrollbar {
+                display: none;
+            }
+        }
+    </style>
+    
+    <!-- 自定义CSS样式 -->
+    <style>
+        .gallery-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            grid-auto-rows: minmax(150px, auto);
+            gap: clamp(1rem, 2vw, 1.5rem); /* 使用clamp确保响应式间距 */
+            align-items: start;
+        }
+        @media (max-width: 640px) {
+            .gallery-grid {
+                grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+                grid-auto-rows: minmax(90px, auto);
+                gap: clamp(0.5rem, 1vw, 0.75rem);
+            }
+        }
+        /* 图片容器样式优化 */
+        .photo-container {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+        .photo-wrapper {
+            flex-grow: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: #f3f4f6;
+            overflow: hidden;
+        }
+        .photo-wrapper img {
+            object-fit: contain;
+            max-width: 100%;
+            max-height: 100%;
+            transition: transform 0.3s ease;
+        }
+        .photo-wrapper:hover img {
+            transform: scale(1.05);
+        }
+        .skeleton-bg {
+            background: linear-gradient(
+                90deg,
+                rgba(241, 245, 249, 0) 0%,
+                rgba(241, 245, 249, 0.6) 50%,
+                rgba(241, 245, 249, 0) 100%
+            );
+            background-size: 200% 100%;
+            animation: skeletonGradient 1.5s infinite;
+        }
+        .card-hover {
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .card-hover:hover {
+            transform: translateY(-4px);
+            }
+            .modal-transition {
+                transition: all 0.3s ease;
+            }
+            /* PageView 样式 */
+            .lightbox-content {
+                position: relative;
+                min-height: 400px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            
+            .lightbox-pageview {
+                display: flex;
+                height: 100%;
+                will-change: transform;
+            }
+            
+            .lightbox-page {
+                min-width: 100%;
+                height: 100%;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                padding: 20px;
+                box-sizing: border-box;
+            }
+            
+            .lightbox-page img {
+                max-width: 100%;
+                max-height: 95vh;
+                object-fit: contain;
+                box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+                border-radius: 8px;
+                transition: transform 0.3s ease;
+            }
+            
+            /* 修复电脑模式下图片和详情界面居中 */
+            @media (min-width: 768px) {
+                #lightbox > div.flex {
+                    justify-content: center;
+                    align-items: center;
+                }
+                
+                #metadata-panel {
+                    transform: translateX(0) !important;
+                    opacity: 1 !important;
+                }
+            }
+            
+            .lightbox-page p {
+                color: white;
+                text-align: center;
+                margin-top: 15px;
+                font-size: 1.1rem;
+                font-weight: 500;
+                text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+            }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col">
+    <!-- 顶部导航栏 -->
+    <header class="bg-white shadow-md sticky top-0 z-50">
+        <div class="container mx-auto px-4 py-3 flex flex-col md:flex-row justify-between items-center">
+            <div class="flex items-center">
+                <!-- 汉堡菜单按钮（仅在小屏幕显示） -->
+                <button id="toggle-sidebar" class="md:hidden mr-2 text-gray-700 hover:text-primary">
+                    <i class="fa fa-bars text-xl"></i>
+                </button>
+                <i class="fa fa-picture-o text-primary text-2xl mr-2"></i>
+                <h1 class="text-xl md:text-2xl font-bold text-gray-800">个人相册浏览器</h1>
+            </div>
+            
+            <div class="mt-3 md:mt-0 w-full md:w-64">
+                <!-- 搜索框 -->
+                <div class="relative w-full">
+                    <input 
+                        type="text" 
+                        id="search-input" 
+                        placeholder="搜索照片..." 
+                        class="w-full px-4 py-2 pl-10 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
+                    >
+                    <i class="fa fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></i>
+                </div>
+            </div>
+            </div>
+            
+            <!-- 二维码图标 -->
+            <div class="ml-4">
+                <button id="show-qr-code" class="p-2 rounded-full hover:bg-gray-100 text-gray-700 hover:text-primary transition-colors duration-300">
+                    <i class="fa fa-qrcode text-xl"></i>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- 二维码模态框 -->
+    <div id="qr-code-modal" class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center">
+        <div class="bg-white rounded-lg p-6 max-w-md w-full shadow-xl transform transition-all">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-semibold text-gray-800">扫码访问</h3>
+                <button id="close-qr-code" class="text-gray-500 hover:text-gray-700">
+                    <i class="fa fa-times text-xl"></i>
+                </button>
+            </div>
+            <div class="flex flex-col items-center justify-center py-4">
+                <div id="qr-code-container" class="bg-white p-4 rounded-md shadow-md mb-4">
+                    <!-- 二维码将在这里动态生成 -->
+                </div>
+                <p class="text-gray-600 text-center" id="qr-code-url">扫描二维码在手机上访问此页面</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 主内容区 -->
+    <div class="flex flex-grow overflow-hidden">
+        <!-- 左侧目录导航 -->
+        <aside id="sidebar" class="hidden md:block w-full md:w-64 bg-white shadow-lg border-r border-gray-200 flex-shrink-0 overflow-y-auto transition-all duration-300 fixed md:relative top-0 left-0 h-full z-40 animate-fade-in">
+            <div class="p-4 border-b bg-gradient-to-r from-primary/10 to-transparent">
+                <h3 class="font-semibold text-dark mb-3 flex items-center">
+                    <i class="fa fa-folder-open text-primary mr-2"></i>
+                    相册目录
+                </h3>
+                
+                <!-- 添加新目录按钮 -->
+                <button id="add-directory" class="w-full flex items-center justify-center gap-2 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 hover:shadow-md transition-all duration-300 transform hover:scale-[1.02] active:scale-[0.98] mb-4">
+                    <i class="fa fa-plus"></i>
+                    <span>添加新目录</span>
+                </button>
+                
+                <!-- 目录列表 -->
+                <div id="directories-list" class="space-y-2">
+                    <!-- 目录列表将在这里动态生成 -->
+                </div>
+            </div>
+        </aside>
+        
+        <!-- 照片内容区 -->
+        <main class="flex-grow overflow-y-auto p-4 md:p-6">
+            <!-- 当前目录显示 -->
+            <div id="current-directory" class="mb-6 bg-white rounded-lg p-4 shadow-sm">
+                <div class="flex items-center justify-between">
+                    <h2 class="text-lg font-semibold text-dark">
+                        <i class="fa fa-folder text-primary mr-2"></i>
+                        <span id="directory-name">未选择目录</span>
+                    </h2>
+                    <div class="flex items-center gap-2">
+                        <span id="photos-count" class="text-sm text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">0 张照片</span>
+                        <select id="sort-select" class="text-sm px-2 py-1 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-primary transition-all duration-300 hover:border-primary/30">
+                            <option value="newest">最新优先</option>
+                            <option value="oldest">最旧优先</option>
+                            <option value="name-asc">名称 A-Z</option>
+                            <option value="name-desc">名称 Z-A</option>
+                            <option value="rating-desc">星级优先</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 相册网格 -->
+            <div id="gallery" class="gallery-grid">
+                <!-- 空状态 -->
+                <div id="empty-state" class="col-span-full flex flex-col items-center justify-center py-16 text-center">
+                    <i class="fa fa-images text-6xl text-gray-300 mb-4"></i>
+                    <h3 class="text-xl font-semibold text-gray-500 mb-2">暂无照片</h3>
+                    <p class="text-gray-400 max-w-md">请从左侧选择一个包含照片的目录开始浏览</p>
+                </div>
+                <!-- 照片将在这里动态生成 -->
+            </div>
+        </main>
+    </div>
+
+    <!-- 照片查看器（大图模式） -->
+    <div id="lightbox" class="fixed inset-0 bg-black/90 z-50 hidden flex items-center justify-center opacity-0 transition-opacity duration-300">
+        <div class="absolute top-4 right-4 flex items-center gap-2">
+            <button id="original-btn" class="p-2 bg-white/20 text-white rounded-full hover:bg-white/30 transition-all">
+                <i class="fa fa-image"></i>
+            </button>
+            <button id="download-btn" class="p-2 bg-white/20 text-white rounded-full hover:bg-white/30 transition-all">
+                <i class="fa fa-download"></i>
+            </button>
+            <button id="close-lightbox" class="p-2 bg-white/20 text-white rounded-full hover:bg-white/30 transition-all">
+                <i class="fa fa-times"></i>
+            </button>
+        </div>
+        
+        <button id="prev-btn" class="absolute left-2 md:left-4 top-1/2 -translate-y-1/2 p-3 bg-white/20 text-white rounded-full hover:bg-white/30 transition-all">
+            <i class="fa fa-chevron-left text-xl"></i>
+        </button>
+        
+        <div class="flex flex-col md:flex-row items-center gap-4 w-full max-w-[100vw] max-h-[100vh] p-2">
+            <!-- 图片区域 - 改为PageView模式 -->
+            <div id="lightbox-content" class="lightbox-content max-w-[90vw] max-h-[95vh] flex-shrink-0 overflow-hidden">
+                <!-- PageView容器 -->
+                <div id="lightbox-pageview" class="flex transition-transform duration-500 ease-out h-full">
+                    <!-- 照片页面将动态生成 -->
+                </div>
+                <!-- 图片加载状态指示器 -->
+                <div id="image-loading-indicator" class="absolute inset-0 flex flex-col items-center justify-center bg-black/30 backdrop-blur-sm hidden z-10">
+                    <div class="w-16 h-16 border-4 border-primary/30 border-t-primary rounded-full animate-spin mb-4"></div>
+                    <p class="text-white text-lg font-medium" id="loading-text">加载中...</p>
+                </div>
+            </div>
+            
+            <!-- 元数据区域 -->
+            <div id="metadata-panel" class="hidden md:block bg-white/10 backdrop-blur-md text-white rounded-lg p-4 max-w-[300px] w-full h-full max-h-[80vh] overflow-y-auto transform translate-x-10 opacity-0 transition-all duration-500">
+                <h3 class="text-lg font-semibold mb-4 text-primary">照片信息</h3>
+                
+                <div class="space-y-3">
+                    <div>
+                        <h4 class="text-sm text-gray-300 mb-1">名称</h4>
+                        <p id="meta-name" class="font-medium truncate"></p>
+                    </div>
+                    
+                    <div>
+                        <h4 class="text-sm text-gray-300 mb-1">拍摄日期</h4>
+                        <p id="meta-date" class="font-medium"></p>
+                    </div>
+                    
+                    <div class="border-t border-white/20 pt-3 mt-3">
+                        <h4 class="text-sm text-gray-300 mb-1">拍摄参数</h4>
+                        <div class="space-y-2">
+                            <div class="flex justify-between">
+                                <span class="text-sm text-gray-300">相机</span>
+                                <span id="meta-camera" class="font-medium text-right"></span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-sm text-gray-300">光圈</span>
+                                <span id="meta-aperture" class="font-medium text-right"></span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-sm text-gray-300">曝光时间</span>
+                                <span id="meta-exposure" class="font-medium text-right"></span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-sm text-gray-300">ISO</span>
+                                <span id="meta-iso" class="font-medium text-right"></span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-sm text-gray-300">焦距</span>
+                                <span id="meta-focal" class="font-medium text-right"></span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="border-t border-white/20 pt-3 mt-3">
+                        <h4 class="text-sm text-gray-300 mb-1">文件信息</h4>
+                        <div class="space-y-2">
+                            <div class="flex justify-between">
+                                <span class="text-sm text-gray-300">修改时间</span>
+                                <span id="meta-modified" class="font-medium text-right text-sm"></span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-sm text-gray-300">文件大小</span>
+                                <span id="meta-size" class="font-medium text-right"></span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="border-t border-white/20 pt-3 mt-3">
+                        <h4 class="text-sm text-gray-300 mb-1">星级</h4>
+                        <div id="meta-rating" class="flex items-center gap-1">
+                            <!-- 星级将动态生成 -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <button id="next-btn" class="absolute right-2 md:right-4 top-1/2 -translate-y-1/2 p-3 bg-white/20 text-white rounded-full hover:bg-white/30 transition-all">
+            <i class="fa fa-chevron-right text-xl"></i>
+        </button>
+        
+        <!-- 移动端元数据按钮 -->
+        <button id="toggle-mobile-metadata-btn" class="absolute bottom-4 left-4 md:hidden bg-white/20 text-white rounded-full p-3 hover:bg-white/30 transition-all">
+            <i class="fa fa-info-circle"></i>
+        </button>
+        
+        <!-- 移动端元数据面板 -->
+        <div id="mobile-metadata" class="fixed inset-0 bg-transparent flex items-center justify-center p-4 z-50 opacity-0 pointer-events-none transition-opacity duration-300">
+            <div class="bg-black/90 backdrop-blur-md text-white rounded-lg p-4 max-w-sm w-full max-h-[80vh] overflow-y-auto transform scale-95 transition-transform duration-300">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-semibold text-primary">照片信息</h3>
+                <button id="close-mobile-metadata" class="p-2 text-white hover:text-gray-300 transition-colors" onclick="toggleMobileMetadata()">
+                    <i class="fa fa-times"></i>
+                </button>
+            </div>
+            
+            <!-- 移动端元数据内容（与桌面版相同） -->
+            <div class="space-y-3">
+                <div>
+                    <h4 class="text-sm text-gray-300 mb-1">名称</h4>
+                    <p id="mobile-meta-name" class="font-medium truncate"></p>
+                </div>
+                
+                <div>
+                    <h4 class="text-sm text-gray-300 mb-1">拍摄日期</h4>
+                    <p id="mobile-meta-date" class="font-medium"></p>
+                </div>
+                
+                <div class="border-t border-white/20 pt-3 mt-3">
+                    <h4 class="text-sm text-gray-300 mb-1">拍摄参数</h4>
+                    <div class="space-y-2">
+                        <div class="flex justify-between">
+                            <span class="text-sm text-gray-300">相机</span>
+                            <span id="mobile-meta-camera" class="font-medium text-right"></span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-sm text-gray-300">光圈</span>
+                            <span id="mobile-meta-aperture" class="font-medium text-right"></span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-sm text-gray-300">曝光时间</span>
+                            <span id="mobile-meta-exposure" class="font-medium text-right"></span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-sm text-gray-300">ISO</span>
+                            <span id="mobile-meta-iso" class="font-medium text-right"></span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-sm text-gray-300">焦距</span>
+                            <span id="mobile-meta-focal" class="font-medium text-right"></span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="border-t border-white/20 pt-3 mt-3">
+                    <h4 class="text-sm text-gray-300 mb-1">星级</h4>
+                    <div id="mobile-meta-rating" class="flex items-center gap-1">
+                        <!-- 星级将动态生成 -->
+                    </div>
+                </div>
+            </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 搜索结果模态框 -->
+    <div id="search-modal" class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center opacity-0 transition-opacity duration-300">
+        <div id="search-modal-content" class="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col transform scale-95 transition-transform duration-300">
+            <div class="p-4 border-b flex justify-between items-center bg-gradient-to-r from-primary/10 to-transparent">
+                <h3 class="text-lg font-semibold text-dark">
+                    搜索结果: <span id="search-query"></span>
+                </h3>
+                <button id="close-search" class="text-gray-500 hover:text-gray-700 transition-colors p-1 rounded-full hover:bg-gray-100">
+                    <i class="fa fa-times text-xl"></i>
+                </button>
+            </div>
+            <div class="p-4 overflow-y-auto flex-grow">
+                <div id="search-results" class="gallery-grid">
+                    <!-- 搜索结果将在这里动态生成 -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 底部信息 -->
+    <footer class="bg-white border-t py-4 text-center text-gray-500 text-sm">
+        <p>个人相册浏览器 &copy; 2023 | 本地照片浏览工具</p>
+    </footer>
+
+    <!-- 外部JavaScript文件引用 -->
+    <script src="/static/js/app.js"></script>
+    <script src="/static/js/gallery.js"></script>
+    <script src="/static/js/lightbox.js"></script>
+    <script src="/static/js/touch.js"></script>
+
+</body>
+</html>
