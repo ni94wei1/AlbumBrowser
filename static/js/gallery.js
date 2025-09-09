@@ -42,6 +42,12 @@ function renderDirectoriesList() {
     elements.directoriesList.innerHTML = '';
     
     state.directories.forEach(dir => {
+        // 添加防御性检查，确保dir.path存在且为字符串
+        if (!dir || typeof dir.path !== 'string') {
+            console.warn('跳过无效目录项:', dir);
+            return;
+        }
+        
         const dirName = dir.name || dir.path.split('\\').pop().split('/').pop();
         const isActive = state.currentDirectory === dir.path;
         
@@ -66,34 +72,82 @@ function renderDirectoriesList() {
 
 // 添加新目录
 function addNewDirectory() {
-    // 注意：在实际环境中，这里可能需要更复杂的目录选择逻辑
-    // 由于安全限制，浏览器无法直接访问本地文件系统目录
-    // 这里提供一个示例，让用户手动输入目录路径
-    const directory = prompt('请输入照片目录路径：');
-    if (directory) {
-        // 在实际应用中，服务端需要验证这个目录是否存在且可访问
-        fetch('/api/directories', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ directory })
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                state.directories = data.directories;
-                renderDirectoriesList();
-                showToast('目录添加成功');
-            } else {
-                showToast('添加失败：' + data.error);
-            }
-        })
-        .catch(error => {
-            console.error('添加目录失败:', error);
-            showToast('添加目录失败，请重试');
-        });
+    // 获取模态框元素
+    const directoryModal = document.getElementById('directory-modal');
+    const directoryInput = document.getElementById('directory-input');
+    const closeModalBtn = document.getElementById('close-directory-modal');
+    const cancelBtn = document.getElementById('cancel-directory');
+    const confirmBtn = document.getElementById('confirm-directory');
+    
+    // 清空输入框
+    directoryInput.value = '';
+    
+    // 显示模态框
+    directoryModal.classList.remove('hidden');
+    
+    // 关闭模态框的函数
+    function closeModal() {
+        directoryModal.classList.add('hidden');
+        // 移除事件监听器以防止内存泄漏
+        closeModalBtn.removeEventListener('click', closeModal);
+        cancelBtn.removeEventListener('click', closeModal);
+        confirmBtn.removeEventListener('click', handleConfirm);
+        
+        // 移除ESC键的事件监听
+        document.removeEventListener('keydown', handleEscKey);
     }
+    
+    // 处理ESC键关闭模态框
+    function handleEscKey(e) {
+        if (e.key === 'Escape') {
+            closeModal();
+        }
+    }
+    
+    // 处理确认添加
+    function handleConfirm() {
+        const directory = directoryInput.value.trim();
+        if (directory) {
+            // 关闭模态框
+            closeModal();
+            
+            // 在实际应用中，服务端需要验证这个目录是否存在且可访问
+            fetch('/api/directories', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ directory })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    state.directories = data.directories;
+                    renderDirectoriesList();
+                    showToast('目录添加成功');
+                } else {
+                    showToast('添加失败：' + data.error);
+                }
+            })
+            .catch(error => {
+                console.error('添加目录失败:', error);
+                showToast('添加目录失败，请重试');
+            });
+        } else {
+            showToast('请输入有效的目录路径');
+        }
+    }
+    
+    // 添加事件监听器
+    closeModalBtn.addEventListener('click', closeModal);
+    cancelBtn.addEventListener('click', closeModal);
+    confirmBtn.addEventListener('click', handleConfirm);
+    
+    // 添加ESC键事件监听
+    document.addEventListener('keydown', handleEscKey);
+    
+    // 自动聚焦到输入框
+    directoryInput.focus();
 }
 
 // 选择目录
@@ -228,14 +282,18 @@ function renderPhotos() {
         
         img.onload = function() {
             // 替换骨架屏为实际图片
-            const wrapper = photoItem.querySelector('.photo-wrapper');
-            wrapper.innerHTML = '';
-            img.className = 'object-contain max-w-full max-h-full rounded-lg transition-all duration-500 group-hover:scale-105 opacity-0 animate-fade-in';
-            img.alt = photo.name;
-            wrapper.appendChild(img);
-            // 强制重排以触发动画
-            void img.offsetWidth;
-            img.classList.remove('opacity-0');
+            if (photoItem && typeof photoItem.querySelector === 'function') {
+                const wrapper = photoItem.querySelector('.photo-wrapper');
+                if (wrapper) {
+                    wrapper.innerHTML = '';
+                    img.className = 'object-contain max-w-full max-h-full rounded-lg transition-all duration-500 group-hover:scale-105 opacity-0 animate-fade-in';
+                    img.alt = photo.name;
+                    wrapper.appendChild(img);
+                    // 强制重排以触发动画
+                    void img.offsetWidth;
+                    img.classList.remove('opacity-0');
+                }
+            }
             
             loadedCount++;
             // 延迟加载下一张，避免一次性请求过多

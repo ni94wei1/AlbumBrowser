@@ -48,6 +48,10 @@ pids
 
 # Coverage directory used by tools like istanbul
 coverage/
+
+# 图片生成目录（包含缩略图和浏览用大图）
+thumbnails/
+viewer_images/
 *.lcov
 
 # nyc test coverage

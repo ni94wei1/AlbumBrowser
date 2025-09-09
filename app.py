@@ -295,6 +295,36 @@ def get_directories():
         "directories": directories
     })
 
+def pregenerate_images_for_directory(directory):
+    """为指定目录预生成照片的缩略图和浏览用大图"""
+    if not os.path.isdir(directory):
+        print(f"[错误] 目录不存在: {directory}")
+        return
+        
+    print(f"[目录添加] 开始为新目录生成图片: {directory}")
+    
+    # 使用集合来跟踪已经处理过的文件路径，避免重复处理
+    processed_files = set()
+    
+    try:
+        # 获取目录中的所有图片文件
+        for filename in os.listdir(directory):
+            file_path = os.path.join(directory, filename)
+            if os.path.isfile(file_path) and os.path.splitext(filename)[1].lower() in SUPPORTED_FORMATS:
+                # 检查文件是否已经处理过
+                if file_path not in processed_files:
+                    # 添加到已处理集合
+                    processed_files.add(file_path)
+                    # 生成并保存缩略图
+                    generate_and_save_thumbnail(file_path)
+                    # 生成并保存浏览用大图
+                    generate_and_save_viewer_image(file_path)
+    except Exception as e:
+        print(f"[错误] 处理目录 {directory} 时出错: {str(e)}")
+    
+    print(f"[目录添加] 图片生成完成，共处理 {len(processed_files)} 个文件")
+
+
 @app.route('/api/directories', methods=['POST'])
 def add_directory():
     """添加新的照片目录"""
@@ -312,6 +342,11 @@ def add_directory():
         # 清空缓存
         with cache_lock:
             cache.clear()
+            
+        # 在独立线程中预生成该目录的图片，避免阻塞API响应
+        pregen_thread = threading.Thread(target=pregenerate_images_for_directory, args=(directory,))
+        pregen_thread.daemon = True  # 设为守护线程，主程序结束时自动终止
+        pregen_thread.start()
     
     return jsonify({"success": True, "directories": config["photo_directories"]})
 
