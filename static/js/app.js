@@ -164,10 +164,53 @@ function addSafeEventListener(element, event, callback) {
     }
 }
 
+// 初始化性能优化模块
+let performanceOptimizer = {
+    initImageLazyLoading: function() { /* 占位函数，将在photo_optimization.js中实现 */ },
+    BatchImageLoader: { queue: [] },
+    preloadNearbyImages: function() { /* 占位函数，将在photo_optimization.js中实现 */ },
+    ImageCacheManager: { has: function() {}, get: function() {}, add: function() {}, cleanup: function() {} }
+};
+
+// 加载性能优化模块（使用传统方式）
+function loadPerformanceOptimizer() {
+    try {
+        // 检查window.performanceModule是否存在（由photo_optimization.js在DOM加载时初始化）
+        if (window.performanceModule) {
+            performanceOptimizer = {
+                initImageLazyLoading: window.performanceModule.initImageLazyLoading,
+                BatchImageLoader: window.performanceModule.BatchImageLoader,
+                preloadNearbyImages: window.performanceModule.preloadNearbyImages,
+                ImageCacheManager: window.performanceModule.ImageCacheManager
+            };
+            console.log('性能优化模块加载成功');
+        } else {
+            // 如果性能优化模块尚未加载，设置一个延时检查
+            setTimeout(() => {
+                if (window.performanceModule) {
+                    performanceOptimizer = window.performanceModule;
+                    console.log('性能优化模块延迟加载成功');
+                } else {
+                    console.warn('性能优化模块未加载，将使用默认实现');
+                }
+            }, 100);
+        }
+        
+        // 将性能优化器暴露给全局
+        window.performanceOptimizer = performanceOptimizer;
+        
+    } catch (error) {
+        console.warn('加载性能优化模块失败，将使用默认实现:', error);
+    }
+}
+
 // 初始化应用
 function init() {
     // 初始化DOM引用
     initDOMReferences();
+    
+    // 加载性能优化模块
+    loadPerformanceOptimizer();
     
     // 加载目录列表
     loadDirectories();
@@ -285,7 +328,21 @@ function setupEventListeners() {
 }
 
 // 启动应用
-document.addEventListener('DOMContentLoaded', init);
+console.log('App脚本加载完成，等待DOMContentLoaded事件...');
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('DOMContentLoaded事件触发，开始初始化应用...');
+    
+    // 确认DOM元素存在
+    const directoriesListElement = document.getElementById('directories-list');
+    console.log('目录列表元素存在:', !!directoriesListElement);
+    
+    init();
+    
+    console.log('应用初始化完成，检查state状态:', {
+        directoriesCount: state.directories.length,
+        currentDirectory: state.currentDirectory
+    });
+});
 
 // 生成二维码函数
 function showQrCode() {
@@ -341,3 +398,4 @@ window.elements = elements;
 window.addSafeEventListener = addSafeEventListener;
 window.showQrCode = showQrCode;
 window.closeQrCodeModal = closeQrCodeModal;
+window.performanceOptimizer = performanceOptimizer;

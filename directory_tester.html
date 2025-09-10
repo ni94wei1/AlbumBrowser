@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>目录加载测试工具</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3B82F6',
+                        secondary: '#10B981',
+                        danger: '#EF4444',
+                        warning: '#F59E0B',
+                        info: '#64748B'
+                    },
+                },
+            }
+        }
+    </script>
+    <style type="text/tailwindcss">
+        @layer utilities {
+            .content-auto {
+                content-visibility: auto;
+            }
+            .scrollbar-hide {
+                scrollbar-width: none;
+                -ms-overflow-style: none;
+            }
+            .scrollbar-hide::-webkit-scrollbar {
+                display: none;
+            }
+        }
+    </style>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: #f8fafc;
+        }
+        .card {
+            border-radius: 8px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            background-color: white;
+            overflow: hidden;
+        }
+        .btn {
+            transition: all 0.2s ease;
+        }
+        .btn:hover {
+            transform: translateY(-1px);
+        }
+        .btn:active {
+            transform: translateY(0);
+        }
+        .test-panel {
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            background-color: #f8fafc;
+        }
+        .test-panel-header {
+            border-bottom: 1px solid #e2e8f0;
+        }
+        .log-item {
+            border-bottom: 1px solid #f1f5f9;
+        }
+        .log-item:last-child {
+            border-bottom: none;
+        }
+        .log-item.error {
+            background-color: #fef2f2;
+        }
+        .log-item.success {
+            background-color: #f0fdf4;
+        }
+        .log-item.info {
+            background-color: #f0f9ff;
+        }
+        .directory-item {
+            transition: all 0.2s ease;
+        }
+        .directory-item:hover {
+            background-color: #f1f5f9;
+        }
+    </style>
+</head>
+<body class="min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <header class="mb-8 text-center">
+            <h1 class="text-3xl font-bold text-gray-800 mb-2">目录加载测试工具</h1>
+            <p class="text-gray-600">用于诊断和测试照片浏览应用的目录加载功能</p>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+            <div class="lg:col-span-2">
+                <div class="card p-6 mb-6">
+                    <h2 class="text-xl font-semibold text-gray-800 mb-4">测试选项</h2>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <button id="test-api" class="btn p-3 bg-primary text-white rounded-md flex items-center justify-center">
+                            <i class="fa fa-server mr-2"></i> 测试目录API
+                        </button>
+                        <button id="test-standard-load" class="btn p-3 bg-secondary text-white rounded-md flex items-center justify-center">
+                            <i class="fa fa-folder-open mr-2"></i> 标准加载目录
+                        </button>
+                        <button id="test-direct-load" class="btn p-3 bg-info text-white rounded-md flex items-center justify-center">
+                            <i class="fa fa-bolt mr-2"></i> 直接加载目录
+                        </button>
+                        <button id="test-dom-elements" class="btn p-3 bg-warning text-white rounded-md flex items-center justify-center">
+                            <i class="fa fa-search mr-2"></i> 检查DOM元素
+                        </button>
+                        <button id="clear-logs" class="btn p-3 bg-gray-500 text-white rounded-md flex items-center justify-center md:col-span-2">
+                            <i class="fa fa-trash mr-2"></i> 清空日志
+                        </button>
+                    </div>
+                </div>
+
+                <div class="card p-6">
+                    <div class="flex items-center justify-between mb-4">
+                        <h2 class="text-xl font-semibold text-gray-800">加载的目录</h2>
+                        <span id="directory-count" class="text-sm bg-gray-200 text-gray-700 px-2 py-1 rounded">0 个目录</span>
+                    </div>
+                    <div id="directories-container" class="border border-gray-200 rounded-md h-96 overflow-y-auto bg-gray-50">
+                        <div class="p-4 text-center text-gray-500">
+                            <i class="fa fa-folder-open text-4xl mb-3"></i>
+                            <p>点击上方按钮开始加载目录</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="lg:col-span-1">
+                <div class="card p-6 h-full">
+                    <h2 class="text-xl font-semibold text-gray-800 mb-4">测试日志</h2>
+                    <div id="log-container" class="border border-gray-200 rounded-md h-[calc(100%-2rem)] overflow-y-auto bg-gray-50">
+                        <div class="p-3 log-item info">
+                            <span class="font-semibold">[${new Date().toLocaleTimeString()}]</span> 测试工具已就绪
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card p-6 mb-8">
+            <h2 class="text-xl font-semibold text-gray-800 mb-4">API响应详情</h2>
+            <div id="api-response-container" class="border border-gray-200 rounded-md p-4 bg-gray-50 h-48 overflow-y-auto">
+                <pre class="text-sm text-gray-600">等待API调用...</pre>
+            </div>
+        </div>
+
+        <div class="card p-6">
+            <h2 class="text-xl font-semibold text-gray-800 mb-4">调试信息</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="test-panel">
+                    <div class="test-panel-header p-3 bg-gray-100">
+                        <h3 class="font-medium text-gray-800">全局状态</h3>
+                    </div>
+                    <div class="p-3" id="global-state-container">
+                        <p class="text-sm text-gray-600">点击"检查DOM元素"按钮查看全局状态</p>
+                    </div>
+                </div>
+                <div class="test-panel">
+                    <div class="test-panel-header p-3 bg-gray-100">
+                        <h3 class="font-medium text-gray-800">DOM元素状态</h3>
+                    </div>
+                    <div class="p-3" id="dom-state-container">
+                        <p class="text-sm text-gray-600">点击"检查DOM元素"按钮查看DOM状态</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <footer class="mt-12 text-center text-gray-500 text-sm">
+            <p>照片浏览应用诊断工具 &copy; ${new Date().getFullYear()}</p>
+        </footer>
+    </div>
+
+    <script>
+        // 全局变量
+        const state = {
+            directories: [],
+            apiResponse: null
+        };
+
+        // DOM元素引用
+        const elements = {
+            testApiBtn: document.getElementById('test-api'),
+            testStandardLoadBtn: document.getElementById('test-standard-load'),
+            testDirectLoadBtn: document.getElementById('test-direct-load'),
+            testDomElementsBtn: document.getElementById('test-dom-elements'),
+            clearLogsBtn: document.getElementById('clear-logs'),
+            directoriesContainer: document.getElementById('directories-container'),
+            logContainer: document.getElementById('log-container'),
+            apiResponseContainer: document.getElementById('api-response-container'),
+            directoryCount: document.getElementById('directory-count'),
+            globalStateContainer: document.getElementById('global-state-container'),
+            domStateContainer: document.getElementById('dom-state-container')
+        };
+
+        // 日志函数
+        function log(message, type = 'info') {
+            // 在控制台打印日志
+            console.log(`[${type.toUpperCase()}] ${message}`);
+
+            // 在页面上显示日志
+            const logItem = document.createElement('div');
+            logItem.className = `p-3 log-item ${type}`;
+            logItem.innerHTML = `<span class="font-semibold">[${new Date().toLocaleTimeString()}]</span> ${message}`;
+            elements.logContainer.appendChild(logItem);
+            elements.logContainer.scrollTop = elements.logContainer.scrollHeight;
+        }
+
+        // 清空日志
+        function clearLogs() {
+            elements.logContainer.innerHTML = '';
+            log('日志已清空');
+        }
+
+        // 显示API响应
+        function showApiResponse(response) {
+            elements.apiResponseContainer.innerHTML = `<pre class="text-sm text-gray-600">${JSON.stringify(response, null, 2)}</pre>`;
+        }
+
+        // 测试目录API
+        function testDirectoriesAPI() {
+            log('开始测试目录API...', 'info');
+            elements.directoriesContainer.innerHTML = '<div class="p-4 text-center text-gray-500"><i class="fa fa-spinner fa-spin text-xl mb-2"></i><p>正在请求API...</p></div>';
+
+            fetch('/api/directories')
+                .then(response => {
+                    log(`API响应状态: ${response.status}`, response.ok ? 'success' : 'error');
+                    return response.json();
+                })
+                .then(data => {
+                    state.apiResponse = data;
+                    showApiResponse(data);
+                    log('API返回数据解析完成', 'info');
+
+                    // 提取目录数据
+                    let directories = [];
+                    if (data.directories && Array.isArray(data.directories)) {
+                        directories = data.directories;
+                    } else if (Array.isArray(data)) {
+                        directories = data;
+                    }
+
+                    state.directories = directories;
+                    log(`提取到 ${directories.length} 个目录`, 'success');
+
+                    // 显示目录
+                    renderDirectories(directories);
+                })
+                .catch(error => {
+                    log(`API请求失败: ${error.message}`, 'error');
+                    elements.directoriesContainer.innerHTML = '<div class="p-4 text-center text-red-500"><i class="fa fa-exclamation-circle text-xl mb-2"></i><p>API请求失败</p></div>';
+                });
+        }
+
+        // 渲染目录列表
+        function renderDirectories(directories) {
+            elements.directoriesContainer.innerHTML = '';
+            elements.directoryCount.textContent = `${directories.length} 个目录`;
+
+            if (directories.length === 0) {
+                elements.directoriesContainer.innerHTML = '<div class="p-4 text-center text-gray-500"><i class="fa fa-info-circle text-xl mb-2"></i><p>未找到任何目录</p></div>';
+                return;
+            }
+
+            directories.forEach((dir, index) => {
+                // 确保目录对象有path属性
+                const dirPath = dir.path || (typeof dir === 'string' ? dir : `目录${index}`);
+                const dirName = dir.name || dirPath.split('\\').pop().split('/').pop();
+
+                const dirItem = document.createElement('div');
+                dirItem.className = 'directory-item p-3 border-b border-gray-200 flex items-center';
+                dirItem.innerHTML = `
+                    <i class="fa fa-folder text-primary mr-3"></i>
+                    <div class="flex-1">
+                        <div class="font-medium truncate" title="${dirPath}">${dirName}</div>
+                        <div class="text-xs text-gray-500 truncate">${dirPath}</div>
+                    </div>
+                `;
+
+                elements.directoriesContainer.appendChild(dirItem);
+            });
+        }
+
+        // 检查全局状态
+        function checkGlobalState() {
+            let html = '';
+            
+            // 检查全局对象
+            const checks = [
+                { name: 'window.state', exists: !!window.state },
+                { name: 'window.loadDirectories', exists: typeof window.loadDirectories === 'function' },
+                { name: 'window.renderDirectoriesList', exists: typeof window.renderDirectoriesList === 'function' },
+                { name: 'window.loadDirectoriesDirectly', exists: typeof window.loadDirectoriesDirectly === 'function' },
+                { name: 'window.isEmptyDirectory', exists: typeof window.isEmptyDirectory === 'function' },
+                { name: 'window.isHiddenDirectory', exists: typeof window.isHiddenDirectory === 'function' }
+            ];
+
+            checks.forEach(check => {
+                html += `
+                    <div class="flex justify-between items-center mb-1 pb-1 border-b border-gray-100">
+                        <span class="text-sm">${check.name}</span>
+                        <span class="text-sm px-2 py-0.5 rounded ${check.exists ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">
+                            ${check.exists ? '存在' : '不存在'}
+                        </span>
+                    </div>
+                `;
+            });
+
+            elements.globalStateContainer.innerHTML = html || '<p class="text-sm text-gray-500">无法检查全局状态</p>';
+        }
+
+        // 检查DOM元素
+        function checkDOMElements() {
+            let html = '';
+
+            const elementsToCheck = [
+                { id: 'directories-list', desc: '目录列表容器' },
+                { id: 'gallery-container', desc: '相册容器' },
+                { id: 'current-directory', desc: '当前目录显示' },
+                { id: 'breadcrumb', desc: '面包屑导航' },
+                { id: 'subdirectories', desc: '子目录导航' }
+            ];
+
+            elementsToCheck.forEach(el => {
+                const element = document.getElementById(el.id);
+                const exists = !!element;
+                
+                html += `
+                    <div class="mb-2 pb-2 border-b border-gray-100">
+                        <div class="flex justify-between items-center mb-1">
+                            <span class="text-sm">${el.desc} (${el.id})</span>
+                            <span class="text-sm px-2 py-0.5 rounded ${exists ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">
+                                ${exists ? '存在' : '不存在'}
+                            </span>
+                        </div>
+                        ${exists ? `
+                            <div class="text-xs text-gray-500 ml-2">
+                                - 子元素: ${element.children.length}<br>
+                                - 可见性: ${element.offsetParent !== null ? '可见' : '隐藏'}
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            });
+
+            elements.domStateContainer.innerHTML = html || '<p class="text-sm text-gray-500">无法检查DOM元素</p>';
+            checkGlobalState();
+            log('DOM元素检查完成', 'info');
+        }
+
+        // 直接加载目录
+        function loadDirectoriesDirectly() {
+            log('开始直接加载目录...', 'info');
+            elements.directoriesContainer.innerHTML = '<div class="p-4 text-center text-gray-500"><i class="fa fa-spinner fa-spin text-xl mb-2"></i><p>正在加载目录...</p></div>';
+
+            fetch('/api/directories')
+                .then(response => response.json())
+                .then(data => {
+                    log('API返回数据', 'info');
+                    showApiResponse(data);
+
+                    // 提取目录数据
+                    let directories = [];
+                    if (data.directories && Array.isArray(data.directories)) {
+                        directories = data.directories;
+                    } else if (Array.isArray(data)) {
+                        directories = data;
+                    }
+
+                    log(`成功加载 ${directories.length} 个目录`, 'success');
+                    renderDirectories(directories);
+                })
+                .catch(error => {
+                    log(`直接加载目录失败: ${error.message}`, 'error');
+                    elements.directoriesContainer.innerHTML = '<div class="p-4 text-center text-red-500"><i class="fa fa-exclamation-circle text-xl mb-2"></i><p>加载目录失败</p></div>';
+                });
+        }
+
+        // 标准加载目录（如果页面中存在相关函数）
+        function loadDirectoriesStandard() {
+            if (window.loadDirectories) {
+                log('调用标准loadDirectories函数...', 'info');
+                try {
+                    window.loadDirectories();
+                    log('标准loadDirectories函数调用成功', 'success');
+                } catch (error) {
+                    log(`标准loadDirectories函数调用失败: ${error.message}`, 'error');
+                }
+            } else {
+                log('标准loadDirectories函数不可用', 'warning');
+                // 回退到直接加载
+                loadDirectoriesDirectly();
+            }
+        }
+
+        // 添加事件监听器
+        elements.testApiBtn.addEventListener('click', testDirectoriesAPI);
+        elements.testStandardLoadBtn.addEventListener('click', loadDirectoriesStandard);
+        elements.testDirectLoadBtn.addEventListener('click', loadDirectoriesDirectly);
+        elements.testDomElementsBtn.addEventListener('click', checkDOMElements);
+        elements.clearLogsBtn.addEventListener('click', clearLogs);
+
+        // 页面加载完成后检查基本状态
+        window.addEventListener('load', function() {
+            log('页面加载完成，测试工具已准备就绪');
+            // 5秒后自动检查DOM元素
+            setTimeout(checkDOMElements, 5000);
+        });
+    </script>
+</body>
+</html>

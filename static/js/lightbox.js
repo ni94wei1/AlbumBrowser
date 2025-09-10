@@ -23,7 +23,7 @@ function renderRating(element, rating) {
 function updatePhotoRating(photoPath, rating) {
     showImageLoadingIndicator('更新星级中...');
     
-    fetch(`/api/photo_rating`, {
+    fetch(`/photo_rating`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
@@ -62,7 +62,7 @@ function updatePhotoRating(photoPath, rating) {
 
 // 获取并显示照片元数据
 function loadAndDisplayMetadata(photoPath) {
-    fetch(`/api/photo_metadata/${encodeURIComponent(photoPath)}`)
+    fetch(`/photo_metadata/${encodeURIComponent(photoPath)}`)
         .then(response => response.json())
         .then(metadata => {
             // 更新桌面端元数据
@@ -197,9 +197,9 @@ function toggleOriginalImage() {
         const timestamp = new Date().getTime();
         
         if (window.state.isOriginalImage) {
-            imageElement.src = `/api/photo/${encodeURIComponent(currentPhoto.path)}?t=${timestamp}`;
+            imageElement.src = `/photo/${encodeURIComponent(currentPhoto.path)}?t=${timestamp}`;
         } else {
-            imageElement.src = `/api/viewer_image/${encodeURIComponent(currentPhoto.path)}?t=${timestamp}`;
+            imageElement.src = `/viewer_image/${encodeURIComponent(currentPhoto.path)}?t=${timestamp}`;
             // 在浏览图模式下重置缩放
             imageElement.style.transform = 'scale(1)';
             window.state.scale = 1;
@@ -253,9 +253,9 @@ function showPreviousPhoto() {
         
         // 更新图片
         if (window.state.isOriginalImage) {
-            imageElement.src = `/api/photo/${encodeURIComponent(currentPhoto.path)}?t=${timestamp}`;
+            imageElement.src = `/photo/${encodeURIComponent(currentPhoto.path)}?t=${timestamp}`;
         } else {
-            imageElement.src = `/api/viewer_image/${encodeURIComponent(currentPhoto.path)}?t=${timestamp}`;
+            imageElement.src = `/viewer_image/${encodeURIComponent(currentPhoto.path)}?t=${timestamp}`;
         }
         
         // 更新标题（如果存在）

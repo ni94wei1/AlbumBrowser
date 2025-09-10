@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>目录加载测试</title>
+    <script>
+        // 测试目录加载功能
+        function testLoadDirectories() {
+            console.log('开始测试目录加载...');
+            
+            // 直接调用API获取目录列表
+            fetch('/api/directories')
+                .then(response => {
+                    console.log('API响应状态:', response.status);
+                    return response.json();
+                })
+                .then(data => {
+                    console.log('API返回数据:', data);
+                    
+                    // 显示结果到页面
+                    const resultElement = document.getElementById('result');
+                    resultElement.innerHTML = '<h3>API返回结果:</h3><pre>' + JSON.stringify(data, null, 2) + '</pre>';
+                    
+                    // 检查是否有目录数据
+                    if (data.directories && data.directories.length > 0) {
+                        document.getElementById('status').innerText = '成功加载到 ' + data.directories.length + ' 个目录';
+                        document.getElementById('status').className = 'text-green-600';
+                    } else {
+                        document.getElementById('status').innerText = '未找到目录数据';
+                        document.getElementById('status').className = 'text-red-600';
+                    }
+                })
+                .catch(error => {
+                    console.error('加载失败:', error);
+                    document.getElementById('status').innerText = '加载失败: ' + error.message;
+                    document.getElementById('status').className = 'text-red-600';
+                    document.getElementById('result').innerHTML = '<pre>' + JSON.stringify(error, null, 2) + '</pre>';
+                });
+        }
+        
+        // 页面加载完成后执行测试
+        document.addEventListener('DOMContentLoaded', testLoadDirectories);
+    </script>
+</head>
+<body style="font-family: Arial, sans-serif; padding: 20px;">
+    <h1>目录加载测试页面</h1>
+    <p>此页面用于测试照片浏览应用的目录加载功能。</p>
+    <div id="status" style="font-weight: bold; margin: 10px 0;">测试中...</div>
+    <div id="result" style="background-color: #f5f5f5; padding: 10px; border-radius: 4px; overflow-x: auto;"></div>
+    <button onclick="testLoadDirectories()" style="margin-top: 10px; padding: 8px 16px; background-color: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer;">重新测试</button>
+    <a href="/" style="display: block; margin-top: 20px; color: #0066cc;">返回主应用</a>
+</body>
+</html>
